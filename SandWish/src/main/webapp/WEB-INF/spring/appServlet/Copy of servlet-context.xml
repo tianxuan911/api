@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans:beans xmlns="http://www.springframework.org/schema/mvc"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:beans="http://www.springframework.org/schema/beans"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="http://www.springframework.org/schema/mvc http://www.springframework.org/schema/mvc/spring-mvc.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
+
+	<!-- DispatcherServlet Context: defines this servlet's request-processing infrastructure -->
+	
+	<!-- Enables the Spring MVC @Controller programming model -->
+	<annotation-driven />
+
+	<!-- Handles HTTP GET requests for /resources/** by efficiently serving up static resources in the ${webappRoot}/resources directory -->
+	<resources mapping="/resources/**" location="/resources/" />
+
+	<!-- Resolves views selected for rendering by @Controllers to .jsp resources in the /WEB-INF/views directory -->
+	<beans:bean class="org.springframework.web.servlet.view.InternalResourceViewResolver">
+		<beans:property name="prefix" value="/WEB-INF/views/" />
+		<beans:property name="suffix" value=".jsp" />
+	</beans:bean>
+	
+	<!-- 自动扫描控制器包 -->
+	<context:component-scan use-default-filters="false" base-package="com.sandwish.site.controller" >
+		<context:include-filter type="annotation" expression="org.springframework.stereotype.Controller"/>
+	</context:component-scan>
+	<!-- 自动扫描业务包 -->
+	<context:component-scan use-default-filters="false" base-package="com.sandwish.site.service" >
+		<context:include-filter type="annotation" expression="org.springframework.stereotype.Service"/>
+	</context:component-scan>
+	<!-- 采用自动扫描方式创建mapper bean(批量更新模式) -->
+	<beans:bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+		<beans:property name="basePackage" value="com.sandwish.site.dao" />
+		<beans:property name="sqlSessionTemplateBeanName" value="sqlSessionTemplateBatch" />
+		<!-- 基于接口的过滤器，实现了该接口的dao才会被扫描器扫描，与basePackage是与的作用。 -->
+		<!--<beans:property name="annotationClass" value="com.xxx.dao.BatchAnnotation" />-->
+	</beans:bean>
+	
+	<!-- 创建dao bean（只需提供接口不需提供实现类 ） -->
+	<!--  <beans:bean id="userMapper" class="org.mybatis.spring.mapper.MapperFactoryBean">
+  		<beans:property name="mapperInterface" value="com.sandwish.site.dao.user.UserMapper" />
+  		<beans:property name="sqlSessionFactory" ref="sqlSessionFactory" /> 
+  		<beans:property name="sqlSessionTemplate" ref="sqlSessionTemplateBatch" />
+	</beans:bean>-->
+	
+</beans:beans>
