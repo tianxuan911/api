@@ -38,7 +38,7 @@ public class HomeController {
 		model.addAttribute("serverTime", formattedDate );
 		User u = userService.getUser("1");
 		model.addAttribute("serverTime", u.getUser_login());
-		//This is a test!		
+		//This is a dev-03!		
 		return "home";
 	}
 	
