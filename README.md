@@ -1,2 +1,2 @@
 # tianxuan
-jus for test
+just for test
