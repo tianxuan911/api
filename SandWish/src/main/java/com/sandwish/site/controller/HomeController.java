@@ -10,10 +10,12 @@ import java.net.URL;
 import java.nio.charset.Charset;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
 
+import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -32,8 +34,11 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseBody;
 
+import com.sandwish.site.common.NetWorkUtil;
+import com.sandwish.site.common.WXConst;
+import com.sandwish.site.common.WXMsgUtil;
+import com.sandwish.site.common.WebAuthAccessTokenUtil;
 import com.sandwish.site.entity.User;
 import com.sandwish.site.service.dao.UserService;
 
@@ -41,17 +46,16 @@ import com.sandwish.site.service.dao.UserService;
  * Handles requests for the application home page.
  */
 @Controller
+@RequestMapping(value = "/")
 public class HomeController {
-	public static final String APPID ="wx3d6354adb178ef15";
-	public static final String APPSECRET = "592771a10582139181d758c6a827816e";
-	public static  String ACCESS_TOKEN = null;
 	private static final Logger logger = LoggerFactory.getLogger(HomeController.class);
 	@Autowired
 	private UserService userService;
+	
 	/**
-	 * Simply selects the home view to render by returning its name.
+	 * 主页
 	 */
-	@RequestMapping(value = "/", method = RequestMethod.GET)
+	@RequestMapping(value = "/home")
 	public String home(Locale locale, Model model) {
 		logger.info("Welcome home! The client locale is {}.", locale);
 		Date date = new Date();
@@ -61,24 +65,54 @@ public class HomeController {
 		
 		model.addAttribute("serverTime", formattedDate );
 		User u = userService.getUser("1");
-		model.addAttribute("serverTime", u.getUser_login());
-		//This is a dev-08!		
+		model.addAttribute("user_login", u.getUser_login());
 		return "home";
 	}
-	@RequestMapping(value = "/weixin", method = RequestMethod.GET)
-	public ResponseEntity<String>  validWeixin(Locale locale,@RequestParam("echostr") String echostr, Model model) {
-		logger.info("Welcome weixin! The client locale is {}.", locale);
-		return getResponseEntity(echostr, HttpStatus.OK);
+	
+	/**
+	 * 服务器验证及消息互动接口
+	 * @param locale
+	 * @param echostr
+	 * @param model
+	 * @return
+	 */
+	@RequestMapping(value = "")
+	public ResponseEntity<String>  entry(HttpServletRequest request,HttpServletResponse response,Locale locale
+			,@RequestParam(value="signature",required=true) String signature
+			,@RequestParam(value="timestamp",required=true) String timestamp
+			,@RequestParam(value="nonce",required=true) String nonce
+		,@RequestParam(value="echostr",required=false) String echostr) {
+		if(RequestMethod.GET.toString().equals(request.getMethod())){
+			logger.debug("验证服务器地址的有效性", locale);
+			String[] tempStr = new String[]{WXConst.TOKEN,timestamp,nonce};
+			Arrays.sort(tempStr);
+			try {
+				if(!WXMsgUtil.SHA1(tempStr[0]+tempStr[1]+tempStr[2]).equals(signature)){
+					logger.debug("服务器地址无效["+NetWorkUtil.getIpAddress(request)+"]", locale);
+				};
+				return getResponseEntity(echostr, HttpStatus.OK);
+			} catch (IOException e) {
+				logger.debug("验证服务器地址的有效性出现错误",e);
+			}
+		}
+		return getResponseEntity(WXMsgUtil.getResponseMsgByRequest(request), HttpStatus.OK);
 	}
+	
+	/**
+	 * 创建微信菜单
+	 * @param locale
+	 * @param model
+	 * @return
+	 */
 	@RequestMapping(value = "/createMenu", method = RequestMethod.GET)
-	public ResponseEntity<String>  validWeixin(Locale locale,Model model) {
-		logger.info("Welcome weixin! The client locale is {}.", locale);
+	public ResponseEntity<String>  createMenu(Locale locale,Model model) {
+		logger.info("创建微信菜单", locale);
 		URL url;
 		ResponseEntity<String> re = null;
-		String menu = "{\"button\":[{	\"type\":\"click\",\"name\":\"今日歌曲\",\"key\":\"V1001_TODAY_MUSIC\"},{\"name\":\"菜单\",\"sub_button\":[{	\"type\":\"view\",\"name\":\"server\",\"url\":\"http://www.aligoa.com/servertime\"},{\"type\":\"view\",\"name\":\"视频\",\"url\":\"http://v.qq.com/\"},{\"type\":\"view\",\"name\":\"绑定\",\"url\":\"https://open.weixin.qq.com/connect/oauth2/authorize?appid=wx3d6354adb178ef15&redirect_uri=http%3A%2F%2Fwww.aligoa.com%2Fbind&response_type=code&scope=snsapi_base&state=123#wechat_redirect\"}]}]}";
+		String menu = WXConst.getMenu();
+		
 		try {
-			getAccessToken();
-			url = new URL("https://api.weixin.qq.com/cgi-bin/menu/create?access_token="+getAccessToken());
+			url = new URL(WXConst.getCreateMenuUrl());
 			HttpURLConnection http = (HttpURLConnection) url.openConnection();
 			http.setRequestMethod("GET");      
 			http.setRequestProperty("Content-Type","application/x-www-form-urlencoded");    
@@ -96,68 +130,59 @@ public class HomeController {
             String message=new String(jsonBytes,"UTF-8");
 			return getResponseEntity("返回信息"+message,HttpStatus.OK);
 		} catch (MalformedURLException e) {
+			logger.info("createMenu 错误",e);
 			re = getResponseEntity( "createMenu 错误"+e.getMessage(),HttpStatus.OK);
-			e.printStackTrace();
 		} catch (ProtocolException e) {
+			logger.info("createMenu 错误",e);
 			re = getResponseEntity( "createMenu 错误"+e.getMessage(),HttpStatus.OK);
-			e.printStackTrace();
 		} catch (IOException e) {
+			logger.info("createMenu 错误",e);
 			re = getResponseEntity( "createMenu 错误"+e.getMessage(),HttpStatus.OK);
-			e.printStackTrace();
 		}
 		return re;
 	}
+	
+	/**
+	 * 获取服务器时间
+	 * @param locale
+	 * @param model
+	 * @return
+	 */
 	@RequestMapping(value = "/servertime", method = RequestMethod.GET)
 	public String getServerTime(Locale locale,Model model) {
-		logger.info(new SimpleDateFormat("yyyy-mm-dd hh:mm:ss").format(Calendar.getInstance().getTime()));
+		logger.info("获取服务器时间"+new SimpleDateFormat("yyyy-mm-dd hh:mm:ss").format(Calendar.getInstance().getTime()));
 		model.addAttribute("servertime", new SimpleDateFormat("yyyy-mm-dd hh:mm:ss").format(Calendar.getInstance().getTime()));
 		return "servertime";
 	}
-	public String  getAccessToken() {
-		logger.info("Welcome weixin! getAccessToken.");
-		if(!StringUtils.isEmpty(ACCESS_TOKEN)){
-        	return  ACCESS_TOKEN;
-        }
-		try {
-			URL url = new URL("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid="+APPID+"&secret="+APPSECRET);
-			HttpURLConnection http = (HttpURLConnection) url.openConnection();
-			http.setRequestMethod("GET");          
-            http.setRequestProperty("Content-Type","application/x-www-form-urlencoded");    
-            http.setDoOutput(true);        
-            http.setDoInput(true);
-            http.connect();
-            InputStream input = http.getInputStream();
-            byte[] inputbs = new byte[input.available()];
-            input.read(inputbs);
-            String message=new String(inputbs,"UTF-8");
-            JSONObject json = new JSONObject (message);
-            ACCESS_TOKEN = json.getString("access_token");
-		} catch (IOException e) {
-			e.printStackTrace();
-		} catch (JSONException e) {
-			e.printStackTrace();
-		}
-		return ACCESS_TOKEN;
-	}
 	
-	private <T> ResponseEntity<T> getResponseEntity(T body, HttpStatus statusCode){
-		HttpHeaders headers = new HttpHeaders();   
-        MediaType mediaType=new MediaType("text","html",Charset.forName("UTF-8"));   
-        headers.setContentType(mediaType);   
-		ResponseEntity<T> re = new ResponseEntity<T>(body,headers,statusCode);
-		return re;
-	}
+	/**
+	 * 模板消息发送接口
+	 * @param locale
+	 * @param request
+	 * @return
+	 */
 	@RequestMapping(value = "/sendMsgToUser")
-	public ResponseEntity<String>  sendMsgToUser(Locale locale,HttpServletRequest request) {
-		logger.info("Welcome weixin! The client locale is {}.", locale);
+	public ResponseEntity<String>  sendMsgToUser(Locale locale,HttpServletRequest request,@RequestParam(value = "name",required = false,defaultValue="太懒了，写点啥吧") String name,
+			@RequestParam(value = "msgtype",required = false,defaultValue="吼吼哈嘿，开始用双截棍") String msgtype,@RequestParam(value = "openid",required = true) String openid) {
+		logger.info("消息发送接口", locale);
 		URL url;
 		ResponseEntity<String> re = null;
-		String msg = "{\"touser\":\""+request.getSession().getAttribute("openid")+"\",\"template_id\":\"wmWzkwTscAFI__1YLxE6uI8e27m_V0tVtCTw3R2lj3U\",\"url\":\"http://www.aligoa.com/\",\"topcolor\":\"#FF0000\",\"data\":{\"name\":{\"value\":\"恭喜你购买成功！\",\"color\":\"#173177\"},\"msgtype\":{\"value\":\"宇宙快递业务\",\"color\":\"#173177\"}}}";
+		String msg = "{\"touser\":\""+openid+"\","
+					+ "\"template_id\":\"OAUzIrj-KAV8A61KhCgLJKwUp8oz4qN6LXDyPdmbrfk\","
+					+ "\"url\":\""+"http://www.aligoa.com"+"\","
+					+ "\"topcolor\":\"#FF0000\","
+					+ "\"data\":"
+						+ "{"
+							+ "\"first\":{\"value\":\""+"我们已收到您的货款，开始为您打包商品，请耐心等待: )"+"\",\"color\":\"#173177\"}"
+							+ ",\"orderMoneySum\":{\"value\":\""+"30.00元"+"\",\"color\":\"#173177\"}"
+							+ ",\"orderProductName\":{\"value\":\""+"我是商品名字"+"\",\"color\":\"#173177\"}"
+							+ ",\"Remark\":{\"value\":\""+"如有问题请致电400-828-1878或直接在微信留言，小易将第一时间为您服务！"+"\",\"color\":\"#173177\"}"
+						+ "}"
+					+ "}";
 		try {
-			getAccessToken();
-			url = new URL("https://api.weixin.qq.com/cgi-bin/message/template/send?access_token="+getAccessToken());
+			url = new URL(WXConst.getSendMsgToUserUrl());
 			HttpURLConnection http = (HttpURLConnection) url.openConnection();
-			http.setRequestMethod("GET");      
+			http.setRequestMethod("POST");      
 			http.setRequestProperty("Content-Type","application/x-www-form-urlencoded");    
 			http.setDoOutput(true);        
 			http.setDoInput(true);
@@ -171,6 +196,8 @@ public class HomeController {
             byte[] jsonBytes =new byte[size];
             is.read(jsonBytes);
             String message=new String(jsonBytes,"UTF-8");
+            logger.info("消息体"+msg);
+            logger.info("返回消息【"+message+"】");
 			return getResponseEntity("返回信息"+message,HttpStatus.OK);
 		} catch (MalformedURLException e) {
 			re = getResponseEntity( "sendMsgToUser 错误"+e.getMessage(),HttpStatus.OK);
@@ -184,13 +211,22 @@ public class HomeController {
 		}
 		return re;
 	}
+	
+	/**
+	 * 静默绑定回调接口
+	 * @param locale
+	 * @param code
+	 * @param model
+	 * @param request
+	 * @return
+	 */
 	@RequestMapping(value = "/bind")
 	public String  bindUser(Locale locale,@RequestParam(value="code",required=false) String code,Model model,HttpServletRequest request) {
-		logger.info("进入会掉方法",locale);
+		logger.info("用户绑定",locale);
 		String access_token = null;
 		String openid = null;
 		try {
-			URL url = new URL("https://api.weixin.qq.com/sns/oauth2/access_token?appid="+APPID+"&secret="+APPSECRET+"&code="+code+"&grant_type=authorization_code");
+			URL url = new URL("https://api.weixin.qq.com/sns/oauth2/access_token?appid="+WXConst.APPID+"&secret="+WXConst.APPSECRET+"&code="+code+"&grant_type=authorization_code");
 			HttpURLConnection http = (HttpURLConnection) url.openConnection();
 			http.setRequestMethod("GET");          
             http.setRequestProperty("Content-Type","application/x-www-form-urlencoded");    
@@ -201,28 +237,168 @@ public class HomeController {
             byte[] inputbs = new byte[input.available()];
             input.read(inputbs);
             String message=new String(inputbs,"UTF-8");
-            logger.info("进入会掉方法"+message,locale);
+            logger.info("用户绑定"+message);
             JSONObject json = new JSONObject (message);
-            access_token = json.getString("access_token");
-            openid = json.getString("openid");
-            model.addAttribute("openid", openid);
-            model.addAttribute("access_token", access_token);
-            request.getSession().setAttribute("openid", openid);
-            request.getSession().setAttribute("access_token", access_token);
+            if(StringUtils.isEmpty(json.optString("errcode"))){
+            	access_token = json.getString("access_token");
+            	openid = json.getString("openid");
+            	request.setAttribute("openid", openid);
+            	request.setAttribute("access_token", access_token);
+            }else{
+            	model.addAttribute("errcode",json.optString("errcode"));
+            	model.addAttribute("errmsg",json.optString("errmsg"));
+            }
 		} catch (IOException e) {
-			logger.info("进入会掉方法"+e.getLocalizedMessage(),locale);
-			e.printStackTrace();
+			logger.info("用户绑定出错",e);
 		} catch (JSONException e) {
-			logger.info("进入会掉方法"+e.getLocalizedMessage(),locale);
-			e.printStackTrace();
+			logger.info("用户绑定出错",e);
 		}
-		logger.info("进入会掉方法返回bindUser",locale);
 		return "bindUser";
 	}
+	/**
+	 * 消息发送跳转接口
+	 * @param locale
+	 * @param userName
+	 * @param passWord
+	 * @param model
+	 * @param request
+	 * @param response
+	 * @return
+	 */
 	@RequestMapping(value = "/bindUser", method = RequestMethod.POST)
-	public String  bindUser(Locale locale,@RequestParam("userName") String userName,@RequestParam("passWord") String passWord, Model model,HttpServletRequest request, HttpServletResponse response) {
-		logger.info("收到来自用户的绑定请求"+"用户名【"+userName+"】密码【"+passWord+"】"
-	+"【OPENID】"+request.getSession().getAttribute("openid")+"【ACCESS_TOKEN】"+request.getSession().getAttribute("access_token"), locale);
+	public String  bindUser(Locale locale,@RequestParam("userName") String userName,@RequestParam("passWord") String passWord,@RequestParam("openid") String openid, Model model,HttpServletRequest request, HttpServletResponse response) {
+		logger.info("收到来自用户的绑定请求"
+				+"用户名【"+userName+"】密码【"+passWord+"】"
+				+"【OPENID】"+openid
+				, locale);
+		//TODO：这里验证用户名和密码的有效性，如果正确则做用户名和OPENID的绑定；否则继续验证用户名和密码		
+		request.setAttribute("openid", openid);
 		return "sendMsgPage";
+	}
+	/**
+	 * 网页绑定回调接口
+	 * @param locale
+	 * @param code
+	 * @param model
+	 * @param request
+	 * @return
+	 */
+	@RequestMapping(value = "/bindUserInfo")
+	public String  bindUserInfo(Locale locale,@RequestParam(value="code",required=false) String code,Model model,HttpServletRequest request) {
+		logger.info("用户绑定信息",locale);
+		String access_token = null;
+		String openid = null;
+		try {
+			URL url = new URL("https://api.weixin.qq.com/sns/oauth2/access_token?appid="+WXConst.APPID+"&secret="+WXConst.APPSECRET+"&code="+code+"&grant_type=authorization_code");
+			HttpURLConnection http = (HttpURLConnection) url.openConnection();
+			http.setRequestMethod("GET");          
+            http.setRequestProperty("Content-Type","application/x-www-form-urlencoded");
+            http.setDoOutput(true);        
+            http.setDoInput(true);
+            http.connect();
+            InputStream input = http.getInputStream();
+            byte[] inputbs = new byte[input.available()];
+            input.read(inputbs);
+            String message=new String(inputbs,"UTF-8");
+            logger.info("用户绑定信息"+message);
+            JSONObject json = new JSONObject (message);
+            if(StringUtils.isEmpty(json.optString("errcode"))){
+            	access_token = json.getString("access_token");
+            	openid = json.getString("openid");
+            	request.getSession().setAttribute("openid", openid);
+            	request.getSession().setAttribute("webauth_access_token", access_token);
+            	logger.info("openid【"+openid+"】token【"+access_token+"】"+"用户sessionid【"+request.getSession().getId()+"】");
+            	//TODO：将用户的网页授权access_token以及refresh_token按照openid存储，持久化到数据库            	
+            	JSONObject user = WebAuthAccessTokenUtil.getUserInfo(access_token, openid);
+    			
+    			model.addAttribute("nickname", user.optString("nickname"));
+    			model.addAttribute("webauth_access_token", access_token);
+    			model.addAttribute("access_token", access_token);
+    			model.addAttribute("openid", openid);
+            }else{
+            	model.addAttribute("errcode",json.optString("errcode"));
+            	model.addAttribute("errmsg",json.optString("errmsg"));
+            }
+		} catch (IOException e) {
+			logger.info("用户绑定信息出错",e);
+		} catch (JSONException e) {
+			logger.info("用户绑定信息出错",e);
+		}
+		return "bindUser";
+	}
+	
+	/**
+	 * 网页绑定接口
+	 * @param locale
+	 * @param code
+	 * @param model
+	 * @param request
+	 * @return
+	 */
+	@RequestMapping(value = "/getUserInfo")
+	public void  getUserInfo(Locale locale,Model model,HttpServletRequest request,HttpServletResponse response) {
+		logger.info("用户绑定信息",locale);
+		String access_token = null;
+		String openid = null;
+		String refresh_token = null;
+		try {
+			//TODO:从数据库查询当前用户的openid,网页授权access_token,refresh_token。如果没有这些信息，
+			//直接跳转到腾讯授权页面，执行授权	
+			response.sendRedirect(WXConst.getAuth_UserInfoUrl(WXConst.APPID));
+			return;
+		}catch (IOException e) {
+			logger.debug("跳转微信授权页面error", e);
+		}
+		//TODO:查询腾讯服务器，当前access_token是否有效，如果无效调用refresh_token刷新授权
+		if(WebAuthAccessTokenUtil.isAuth_AccessTokenValid(access_token, openid)){
+			//获取用户信息，放到request中，传递给下个页面
+			JSONObject user = WebAuthAccessTokenUtil.getUserInfo(access_token, openid);
+			model.addAttribute("nickname", user.optString("nickname"));
+			try {
+				request.getRequestDispatcher("/userInfo").forward(request, response);
+				return;
+			} catch (ServletException e) {
+				logger.debug("转发至/userInfo发生error", e);
+				e.printStackTrace();
+			} catch (IOException e) {
+				logger.debug("转发至/userInfo发生error", e);
+				e.printStackTrace();
+			}
+			return;
+		}else{
+			String result = WebAuthAccessTokenUtil.RefreshAuth_Token(refresh_token,WXConst.APPID);
+			//如果调用refresh_token刷新授权，返回结果提示refresh_token过期，跳转到微信授权页面，执行授权	
+			if("42002".equalsIgnoreCase(result)){
+				try {
+					response.sendRedirect(WXConst.getAuth_UserInfoUrl(WXConst.APPID));
+				} catch (IOException e) {
+					logger.debug("重定向至微信授权页面error", e);
+				}
+				return;
+			}else{
+				try {
+					request.getRequestDispatcher("/getUserInfo").forward(request, response);
+				} catch (IOException e) {
+					logger.debug("转发至/getUserInfo发生error", e);
+				} catch (ServletException e) {
+					logger.debug("转发至/getUserInfo发生error", e);
+				}
+			}
+		}
+	}
+	
+	private static <T> ResponseEntity<T> getResponseEntity(T body, HttpStatus statusCode){
+		HttpHeaders headers = new HttpHeaders();
+        MediaType mediaType=new MediaType("text","html",Charset.forName("UTF-8"));   
+        headers.setContentType(mediaType);   
+		ResponseEntity<T> re = new ResponseEntity<T>(body,headers,statusCode);
+		return re;
+	}
+	
+	private static <T> ResponseEntity<T> getResponseEntity(MediaType mediaType,T body, HttpStatus statusCode){
+		HttpHeaders headers = new HttpHeaders();
+		headers.setContentType(new MediaType(mediaType.getType(), mediaType.getSubtype(), Charset.forName("UTF-8")));   
+		ResponseEntity<T> re = new ResponseEntity<T>(body,headers,statusCode);
+		return re;
 	}
 }
